@@ -1,0 +1,8 @@
+INFO: [VRFC 10-2263] Analyzing Verilog file "D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/ip/BFSK_sim_clk_gen_0_0/sim/BFSK_sim_clk_gen_0_0.v" into library xil_defaultlib
+INFO: [VRFC 10-311] analyzing module BFSK_sim_clk_gen_0_0
+INFO: [VRFC 10-2263] Analyzing Verilog file "D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/sim/BFSK.v" into library xil_defaultlib
+INFO: [VRFC 10-311] analyzing module BFSK
+INFO: [VRFC 10-2263] Analyzing Verilog file "D:/VIVADO_Project/FSK_modul/BFSK/hdl/BFSK_wrapper.v" into library xil_defaultlib
+INFO: [VRFC 10-311] analyzing module BFSK_wrapper
+INFO: [VRFC 10-2263] Analyzing Verilog file "D:/VIVADO_Project/FSK_modul/BFSK/BFSK.sim/sim_1/behav/xsim/glbl.v" into library xil_defaultlib
+INFO: [VRFC 10-311] analyzing module glbl

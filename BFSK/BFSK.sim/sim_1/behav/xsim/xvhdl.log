@@ -1,0 +1,10 @@
+INFO: [VRFC 10-163] Analyzing VHDL file "D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/ip/BFSK_dds_compiler_0_0/sim/BFSK_dds_compiler_0_0.vhd" into library xil_defaultlib
+INFO: [VRFC 10-3107] analyzing entity 'BFSK_dds_compiler_0_0'
+INFO: [VRFC 10-163] Analyzing VHDL file "D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/ip/BFSK_dds_compiler_0_1/sim/BFSK_dds_compiler_0_1.vhd" into library xil_defaultlib
+INFO: [VRFC 10-3107] analyzing entity 'BFSK_dds_compiler_0_1'
+INFO: [VRFC 10-163] Analyzing VHDL file "D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/ipshared/e655/fsk_dieuche.vhd" into library xil_defaultlib
+INFO: [VRFC 10-3107] analyzing entity 'mux2x1_chain'
+INFO: [VRFC 10-163] Analyzing VHDL file "D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/ip/BFSK_mux2x1_chain_0_0/sim/BFSK_mux2x1_chain_0_0.vhd" into library xil_defaultlib
+INFO: [VRFC 10-3107] analyzing entity 'BFSK_mux2x1_chain_0_0'
+INFO: [VRFC 10-163] Analyzing VHDL file "D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/ip/BFSK_c_addsub_0_0/sim/BFSK_c_addsub_0_0.vhd" into library xil_defaultlib
+INFO: [VRFC 10-3107] analyzing entity 'BFSK_c_addsub_0_0'

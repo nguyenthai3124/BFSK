@@ -1,0 +1,82 @@
+Vivado Simulator v2024.2.0
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+Running: D:/Xilinx/Vivado/2024.2/bin/unwrapped/win64.o/xelab.exe --incr --debug typical --relax --mt 2 -L xil_defaultlib -L xbip_utils_v3_0_14 -L axi_utils_v2_0_10 -L mult_gen_v12_0_22 -L xbip_dsp48_wrapper_v3_0_6 -L xbip_pipe_v3_0_10 -L floating_point_v7_1_19 -L dds_compiler_v6_0_26 -L sim_clk_gen_v1_0_5 -L c_reg_fd_v12_0_10 -L c_addsub_v12_0_19 -L unisims_ver -L unimacro_ver -L secureip -L xpm --snapshot BFSK_wrapper_behav xil_defaultlib.BFSK_wrapper xil_defaultlib.glbl -log elaborate.log 
+Using 2 slave threads.
+Starting static elaboration
+Pass Through NonSizing Optimizer
+WARNING: [VRFC 10-5021] port 'm_axis_data_tvalid' is not connected on this instance [D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/sim/BFSK.v:34]
+WARNING: [VRFC 10-5021] port 'm_axis_data_tvalid' is not connected on this instance [D:/VIVADO_Project/FSK_modul/BFSK/BFSK.ip_user_files/bd/BFSK/sim/BFSK.v:37]
+Completed static elaboration
+Starting simulation data flow analysis
+Completed simulation data flow analysis
+Time Resolution for simulation is 1ps
+Compiling package std.standard
+Compiling package std.textio
+Compiling package ieee.std_logic_1164
+Compiling package ieee.numeric_std
+Compiling package c_addsub_v12_0_19.c_addsub_v12_0_19_viv_comp
+Compiling package xbip_utils_v3_0_14.xbip_utils_v3_0_14_pkg
+Compiling package xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv_comp
+Compiling package c_addsub_v12_0_19.c_addsub_v12_0_19_pkg
+Compiling package c_addsub_v12_0_19.c_addsub_v12_0_19_pkg_legacy
+Compiling package c_reg_fd_v12_0_10.c_reg_fd_v12_0_10_viv_comp
+Compiling package unisim.vcomponents
+Compiling package xbip_utils_v3_0_14.xcc_utils_v3_0
+Compiling package dds_compiler_v6_0_26.dds_compiler_v6_0_26_viv_comp
+Compiling package ieee.std_logic_arith
+Compiling package ieee.std_logic_signed
+Compiling package dds_compiler_v6_0_26.pkg_dds_compiler_v6_0_26
+Compiling package dds_compiler_v6_0_26.dds_compiler_v6_0_26_hdl_comps
+Compiling package axi_utils_v2_0_10.axi_utils_v2_0_10_pkg
+Compiling package ieee.math_real
+Compiling package axi_utils_v2_0_10.global_util_pkg
+Compiling package axi_utils_v2_0_10.axi_utils_comps
+Compiling package ieee.std_logic_unsigned
+Compiling package dds_compiler_v6_0_26.pkg_betas
+Compiling package dds_compiler_v6_0_26.pkg_alphas
+Compiling architecture structural of entity c_reg_fd_v12_0_10.c_reg_fd_v12_0_10_viv [\c_reg_fd_v12_0_10_viv(c_width=1...]
+Compiling architecture muxcy_v of entity unisim.MUXCY [muxcy_default]
+Compiling architecture xorcy_v of entity unisim.XORCY [xorcy_default]
+Compiling architecture rtl of entity c_addsub_v12_0_19.c_addsub_v12_0_19_lut6_legacy [\c_addsub_v12_0_19_lut6_legacy(c...]
+Compiling architecture synth of entity c_addsub_v12_0_19.c_addsub_v12_0_19_fabric_legacy [\c_addsub_v12_0_19_fabric_legacy...]
+Compiling architecture synth of entity c_addsub_v12_0_19.c_addsub_v12_0_19_legacy [\c_addsub_v12_0_19_legacy(c_fami...]
+Compiling architecture synth of entity c_addsub_v12_0_19.c_addsub_v12_0_19_viv [\c_addsub_v12_0_19_viv(c_xdevice...]
+Compiling architecture xilinx of entity c_addsub_v12_0_19.c_addsub_v12_0_19 [\c_addsub_v12_0_19(c_xdevicefami...]
+Compiling architecture bfsk_c_addsub_0_0_arch of entity xil_defaultlib.BFSK_c_addsub_0_0 [bfsk_c_addsub_0_0_default]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_latency...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_latency...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.dds_compiler_v6_0_26_rdy [\dds_compiler_v6_0_26_rdy(c_has_...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.dither_wrap [\dither_wrap(ci_phase_err_width=...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_has_ce=...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_has_ce=...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_has_ce=...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_latency...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.pipe_add [\pipe_add(c_width=17,c_seg_width...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.accum [\accum(c_xdevicefamily="artix7",...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_latency...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_latency...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_latency...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_latency...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_latency...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.sin_cos [\sin_cos(c_xdevicefamily="artix7...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_has_ce=...]
+Compiling architecture synth of entity xbip_pipe_v3_0_10.xbip_pipe_v3_0_10_viv [\xbip_pipe_v3_0_10_viv(c_has_ce=...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.dds_compiler_v6_0_26_core [\dds_compiler_v6_0_26_core(c_xde...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.dds_compiler_v6_0_26_viv [\dds_compiler_v6_0_26_viv(c_xdev...]
+Compiling architecture xilinx of entity dds_compiler_v6_0_26.dds_compiler_v6_0_26 [\dds_compiler_v6_0_26(c_xdevicef...]
+Compiling architecture bfsk_dds_compiler_0_0_arch of entity xil_defaultlib.BFSK_dds_compiler_0_0 [bfsk_dds_compiler_0_0_default]
+Compiling architecture synth of entity dds_compiler_v6_0_26.accum [\accum(c_xdevicefamily="artix7",...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.sin_cos [\sin_cos(c_xdevicefamily="artix7...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.dds_compiler_v6_0_26_core [\dds_compiler_v6_0_26_core(c_xde...]
+Compiling architecture synth of entity dds_compiler_v6_0_26.dds_compiler_v6_0_26_viv [\dds_compiler_v6_0_26_viv(c_xdev...]
+Compiling architecture xilinx of entity dds_compiler_v6_0_26.dds_compiler_v6_0_26 [\dds_compiler_v6_0_26(c_xdevicef...]
+Compiling architecture bfsk_dds_compiler_0_1_arch of entity xil_defaultlib.BFSK_dds_compiler_0_1 [bfsk_dds_compiler_0_1_default]
+Compiling architecture behavioral of entity xil_defaultlib.mux2x1_chain [mux2x1_chain_default]
+Compiling architecture bfsk_mux2x1_chain_0_0_arch of entity xil_defaultlib.BFSK_mux2x1_chain_0_0 [bfsk_mux2x1_chain_0_0_default]
+Compiling module sim_clk_gen_v1_0_5.sim_clk_gen(CLOCK_PERIOD=10,RESE...
+Compiling module xil_defaultlib.BFSK_sim_clk_gen_0_0
+Compiling module xil_defaultlib.BFSK
+Compiling module xil_defaultlib.BFSK_wrapper
+Compiling module xil_defaultlib.glbl
+Built simulation snapshot BFSK_wrapper_behav

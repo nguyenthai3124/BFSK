@@ -1,0 +1,10 @@
+# compile vhdl design source files
+vhdl xil_defaultlib  \
+"../../../../BFSK.ip_user_files/bd/BFSK/ip/BFSK_dds_compiler_0_0/sim/BFSK_dds_compiler_0_0.vhd" \
+"../../../../BFSK.ip_user_files/bd/BFSK/ip/BFSK_dds_compiler_0_1/sim/BFSK_dds_compiler_0_1.vhd" \
+"../../../../BFSK.ip_user_files/bd/BFSK/ipshared/e655/fsk_dieuche.vhd" \
+"../../../../BFSK.ip_user_files/bd/BFSK/ip/BFSK_mux2x1_chain_0_0/sim/BFSK_mux2x1_chain_0_0.vhd" \
+"../../../../BFSK.ip_user_files/bd/BFSK/ip/BFSK_c_addsub_0_0/sim/BFSK_c_addsub_0_0.vhd" \
+
+# Do not sort compile order
+nosort

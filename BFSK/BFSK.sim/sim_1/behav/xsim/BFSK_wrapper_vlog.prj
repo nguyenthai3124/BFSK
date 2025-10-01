@@ -1,0 +1,11 @@
+# compile verilog/system verilog design source files
+verilog xil_defaultlib  \
+"../../../../BFSK.ip_user_files/bd/BFSK/ip/BFSK_sim_clk_gen_0_0/sim/BFSK_sim_clk_gen_0_0.v" \
+"../../../../BFSK.ip_user_files/bd/BFSK/sim/BFSK.v" \
+"../../../../hdl/BFSK_wrapper.v" \
+
+# compile glbl module
+verilog xil_defaultlib "glbl.v"
+
+# Do not sort compile order
+nosort

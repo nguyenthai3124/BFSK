@@ -1,0 +1,8 @@
+verilog xil_defaultlib  \
+"../../../bd/BFSK/ip/BFSK_sim_clk_gen_0_0/sim/BFSK_sim_clk_gen_0_0.v" \
+"../../../bd/BFSK/sim/BFSK.v" \
+
+verilog xil_defaultlib "glbl.v"
+
+# Do not sort compile order
+nosort
