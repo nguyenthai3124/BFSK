@@ -1,0 +1,1815 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+entity i2c is
+    Port (
+        -- System signals
+        clk         : in  STD_LOGIC;  -- System clock (higher frequency)
+        reset       : in  STD_LOGIC;  
+        
+        -- Control signals
+        start       : in  STD_LOGIC;  -- Start transmission
+        
+        -- Status signals
+      --  busy        : out STD_LOGIC;  -- Transmission in progress
+      --  done        : out STD_LOGIC;  -- Transmission complete
+      --  ack_error   : out STD_LOGIC;  -- ACK not received
+        
+        -- I2C bus signals
+        scl         : out STD_LOGIC;  -- I2C clock (400kHz)
+        sda         : inout STD_LOGIC; -- I2C data
+        sda_out_i2c     : out std_logic ; -- check
+       -- sda_en_i2c      : out std_logic; 
+        -- check
+        led_check   : out std_logic := '0'
+        
+    );
+end i2c;
+
+architecture frame of i2c is
+    
+    -- Constants
+    constant ADAU1761_ADDR : STD_LOGIC_VECTOR(7 downto 0) := "01110110";  -- 8-bit address
+    --Fs
+    constant addr_R0       : STD_LOGIC_VECTOR(15 downto 0) := x"4000";
+    constant addr_R1       : STD_LOGIC_VECTOR(15 downto 0) := x"4002";
+    
+    -- i2s
+    constant addr_R16       : STD_LOGIC_VECTOR(15 downto 0) := x"4016";
+    constant addr_R64       : STD_LOGIC_VECTOR(15 downto 0) := x"40F8";
+    constant addr_R15       : STD_LOGIC_VECTOR(15 downto 0) := x"4015";
+    constant addr_R17       : STD_LOGIC_VECTOR(15 downto 0) := x"4017";
+    constant addr_R57       : STD_LOGIC_VECTOR(15 downto 0) := x"40EB";
+    --volume line out
+    constant addr_R31       : STD_LOGIC_VECTOR(15 downto 0) := x"4025";
+    constant addr_R32       : STD_LOGIC_VECTOR(15 downto 0) := x"4026";
+    --
+    
+    constant data_R0       : STD_LOGIC_VECTOR(7 downto 0) := "00001111";
+    constant data_R1       : STD_LOGIC_VECTOR(47 downto 0) := "000000100111000100000010001111000010000100000011";
+    constant data_R31       : STD_LOGIC_VECTOR(7 downto 0) := "11110010";
+    constant data_R32       : STD_LOGIC_VECTOR(7 downto 0) := "11110010";    
+    constant data_R16       : STD_LOGIC_VECTOR(7 downto 0) := "01000000";
+    constant data_R64       : STD_LOGIC_VECTOR(7 downto 0) := "00000110";
+    constant data_R15       : STD_LOGIC_VECTOR(7 downto 0) := "01010001";
+    constant data_R17       : STD_LOGIC_VECTOR(7 downto 0) := "00000110";
+    constant data_R57       : STD_LOGIC_VECTOR(7 downto 0) := "00000000";
+    --
+    
+    -- Clock divider for 400kHz SCL (assuming system clock is much higher)
+    constant CLOCK_DIVIDE : integer := 250; -- Adjust based on your system clock frequency
+    constant STOP_DELAY_CYCLES : integer := 150; -- ~0.6us delay for stop condition
+    constant START_DELAY_CYCLES : integer := 150; -- ~0.6us delay for stop condition
+    -- FSM States
+    type state_type is (
+        IDLE,
+        -- First transaction (R0 register)
+        START_COND_R0,
+        ADAU_addr,
+        WAIT_ACK_CHIP_R0,
+        SEND_REG_ADDR_H_R0,
+        WAIT_ACK_REG_H_R0,
+        SEND_REG_ADDR_L_R0,
+        WAIT_ACK_REG_L_R0,
+        SEND_DATA_R0,
+        WAIT_ACK_DATA_R0,
+        STOP_COND_R0,
+        
+        -- Second transaction (R15 register)
+        START_COND_R15,
+        SEND_CHIP_ADDR_R15,
+        WAIT_ACK_CHIP_R15,
+        SEND_REG_ADDR_H_R15,
+        WAIT_ACK_REG_H_R15,
+        SEND_REG_ADDR_L_R15,
+        WAIT_ACK_REG_L_R15,
+        SEND_DATA_R15,
+        WAIT_ACK_DATA_R15,
+        STOP_COND_R15,
+        
+        --R31
+        START_COND_R31,
+        SEND_CHIP_ADDR_R31,
+        WAIT_ACK_CHIP_R31,
+        SEND_REG_ADDR_H_R31,
+        WAIT_ACK_REG_H_R31,
+        SEND_REG_ADDR_L_R31,
+        WAIT_ACK_REG_L_R31,
+        SEND_DATA_R31,
+        WAIT_ACK_DATA_R31,
+        STOP_COND_R31,
+        
+        --R57
+        START_COND_R57,
+        SEND_CHIP_ADDR_R57,
+        WAIT_ACK_CHIP_R57,
+        SEND_REG_ADDR_H_R57,
+        WAIT_ACK_REG_H_R57,
+        SEND_REG_ADDR_L_R57,
+        WAIT_ACK_REG_L_R57,
+        SEND_DATA_R57,
+        WAIT_ACK_DATA_R57,
+        STOP_COND_R57,
+        
+        --R64
+        START_COND_R64,
+        SEND_CHIP_ADDR_R64,
+        WAIT_ACK_CHIP_R64,
+        SEND_REG_ADDR_H_R64,
+        WAIT_ACK_REG_H_R64,
+        SEND_REG_ADDR_L_R64,
+        WAIT_ACK_REG_L_R64,
+        SEND_DATA_R64,
+        WAIT_ACK_DATA_R64,
+        STOP_COND_R64,
+        
+        DONE_STATE
+    );
+    
+    signal state_reg        : state_type;
+    signal state_next       : state_type;
+    signal bit_count_reg    : unsigned(7 downto 0);
+    signal bit_count_next   : unsigned(7 downto 0);
+    signal byte_count_reg   : unsigned(2 downto 0);
+    signal byte_count_next  : unsigned(2 downto 0);
+    signal tx_data_reg      : STD_LOGIC_VECTOR(7 downto 0);
+    signal tx_data_next     : STD_LOGIC_VECTOR(7 downto 0);
+    
+    signal busy : std_logic;
+    signal done : std_logic;
+    signal sda_en_i2c : std_logic;
+    
+    signal ack_error_int0    : STD_LOGIC := '0';
+    signal ack_error_next0   : STD_LOGIC;
+    signal ack_error_int1    : STD_LOGIC := '0';
+    signal ack_error_next1   : STD_LOGIC;
+    signal ack_error_int2    : STD_LOGIC := '0';
+    signal ack_error_next2   : STD_LOGIC;
+    signal ack_error_int3    : STD_LOGIC := '0';
+    signal ack_error_next3   : STD_LOGIC;
+    signal ack_error_int4    : STD_LOGIC := '0';
+    signal ack_error_next4   : STD_LOGIC;
+    signal ack_error_int5    : STD_LOGIC := '0';
+    signal ack_error_next5   : STD_LOGIC;
+    signal ack_error_int6    : STD_LOGIC := '0';
+    signal ack_error_next6   : STD_LOGIC;
+    signal ack_error_int7    : STD_LOGIC := '0';
+    signal ack_error_next7   : STD_LOGIC;
+    signal ack_error_int8    : STD_LOGIC := '0';
+    signal ack_error_next8   : STD_LOGIC;
+    signal ack_error_int9    : STD_LOGIC := '0';
+    signal ack_error_next9   : STD_LOGIC;
+    signal ack_error_int10    : STD_LOGIC := '0';
+    signal ack_error_next10   : STD_LOGIC;
+    signal ack_error_int11    : STD_LOGIC := '0';
+    signal ack_error_next11   : STD_LOGIC;
+    signal ack_error_int12    : STD_LOGIC := '0';
+    signal ack_error_next12   : STD_LOGIC;
+    signal ack_error_int13    : STD_LOGIC := '0';
+    signal ack_error_next13   : STD_LOGIC;
+    signal ack_error_int14    : STD_LOGIC := '0';
+    signal ack_error_next14   : STD_LOGIC;
+    signal ack_error_int15  : STD_LOGIC := '0';
+    signal ack_error_next15   : STD_LOGIC;
+    signal ack_error_int16    : STD_LOGIC := '0';
+    signal ack_error_next16   : STD_LOGIC;
+    signal ack_error_int17    : STD_LOGIC := '0';
+    signal ack_error_next17   : STD_LOGIC;
+    signal ack_error_int18    : STD_LOGIC := '0';
+    signal ack_error_next18   : STD_LOGIC;
+    signal ack_error_int19    : STD_LOGIC := '0';
+    signal ack_error_next19   : STD_LOGIC;
+    -- SCL generation: dùng integer để so sánh trực tiếp
+    signal scl_count_reg    :  unsigned(7 downto 0);
+    signal scl_count_next   :  unsigned(7 downto 0);
+    signal scl_reg          : STD_LOGIC := '1';
+    signal scl_next         : STD_LOGIC := '1';
+    signal led_reg, led_next : std_logic:='0';
+
+    -- delay
+    signal delay_counter_reg    : unsigned(7 downto 0);
+    signal delay_counter_next : unsigned(7 downto 0);
+    signal delay_stop_reg : unsigned(7 downto 0);
+    signal delay_stop_next: unsigned(7 downto 0);
+    signal stop: std_logic;
+    signal ack_error : std_logic;
+
+    -- done
+    signal busy_reg         : STD_LOGIC;
+    signal busy_next        : STD_LOGIC;
+    signal done_reg         : STD_LOGIC;
+    signal done_next        : STD_LOGIC;
+
+    -- SDA control
+    signal sda_reg, sda_next          : STD_LOGIC ;
+    signal sda_oen_reg, sda_oen_next  : STD_LOGIC ; -- 0 = drive, 1 = tri-state (release)
+begin
+
+    -- map internal tri-state to external inout SDA
+    -- I2C: only drive '0'; never drive '1' (let pull-up handle it)
+     sda <= sda_reg when (sda_oen_reg = '0') else 'Z';
+    -- optional outputs for observation/debug
+    --sda <= sda_reg;
+    --sda_out_i2c <= sda_reg;
+    sda_en_i2c  <= sda_oen_reg;
+    led_check <= led_reg;
+    scl <= scl_reg;
+
+    -- State register process (sequential)
+    process(clk, reset)
+    begin
+        if reset = '0' then  -- active-low reset as in your code
+            state_reg <= IDLE;
+            bit_count_reg <= (others => '0');
+            scl_count_reg <= (others => '0');
+            byte_count_reg <= (others => '0');
+            tx_data_reg <= (others => '0');
+            ack_error_int0 <= '0';
+            ack_error_int1 <= '0';
+            ack_error_int2 <= '0';
+            ack_error_int3 <= '0';
+            ack_error_int4 <= '0';
+            ack_error_int5 <= '0';
+            ack_error_int6 <= '0';
+            ack_error_int7 <= '0';
+            ack_error_int8 <= '0';
+            ack_error_int9 <= '0';
+            ack_error_int10 <= '0';
+            ack_error_int11<= '0';
+            ack_error_int12 <= '0';
+            ack_error_int13 <= '0';
+            ack_error_int14 <= '0';
+            ack_error_int15 <= '0';
+            ack_error_int16 <= '0';
+            ack_error_int17 <= '0';
+            ack_error_int18 <= '0';
+            ack_error_int19 <= '0';
+
+            busy_reg <= '0';
+            done_reg <= '0';
+            sda_reg <= '1';
+            sda_oen_reg <= '1'; -- release by default
+            led_reg <= '0';
+            delay_counter_reg <= (others => '0');
+            delay_stop_reg<=(others => '0');
+        elsif rising_edge(clk) then
+            state_reg <= state_next;
+            bit_count_reg <= bit_count_next;
+            scl_count_reg <= scl_count_next;
+            scl_reg  <= scl_next;
+            byte_count_reg <= byte_count_next;
+            tx_data_reg <= tx_data_next;
+            busy_reg <= busy_next;
+            sda_reg <= sda_next;
+            sda_oen_reg <= sda_oen_next;  -- *fix here*
+            done_reg <= done_next;
+            ack_error_int0 <= ack_error_next0;
+            ack_error_int1 <= ack_error_next1;
+            ack_error_int2 <= ack_error_next2;
+            ack_error_int3 <= ack_error_next3;
+            ack_error_int4 <= ack_error_next4;
+            ack_error_int5 <= ack_error_next5;
+            ack_error_int6 <= ack_error_next6;
+            ack_error_int7 <= ack_error_next7;
+            ack_error_int8 <= ack_error_next8;
+            ack_error_int9 <= ack_error_next9;
+            ack_error_int10 <= ack_error_next10;
+            ack_error_int11<= ack_error_next11;
+            ack_error_int12 <= ack_error_next12;
+            ack_error_int13 <= ack_error_next13;
+            ack_error_int14 <= ack_error_next14;
+            ack_error_int15 <= ack_error_next15;
+            ack_error_int16 <= ack_error_next16;
+            ack_error_int17 <= ack_error_next17;
+            ack_error_int18 <= ack_error_next18;
+            ack_error_int19 <= ack_error_next19;
+
+            led_reg <= led_next;
+            delay_counter_reg <= delay_counter_next;
+            delay_stop_reg<=delay_stop_next;
+        end if;
+    end process;
+
+    -- Main FSM combinational
+    process(state_reg, scl_count_reg,      bit_count_reg, byte_count_reg,ack_error_int1, ack_error_int2, ack_error_int3,
+            tx_data_reg, start,            sda_reg, busy_reg,led_reg,
+            done_reg, ack_error_int0,      delay_counter_reg, stop, sda_reg,delay_stop_reg)
+    begin
+        -- defaults
+        state_next <= state_reg;
+        scl_count_next <= scl_count_reg;
+        bit_count_next <= bit_count_reg;
+        scl_next <= scl_reg;
+        byte_count_next <= byte_count_reg;
+        tx_data_next <= tx_data_reg;
+        busy_next <= busy_reg;
+        done_next <= done_reg;
+        ack_error_next0 <= ack_error_int0;
+        ack_error_next1 <= ack_error_int1;
+        ack_error_next2 <= ack_error_int2;
+        ack_error_next3 <= ack_error_int3;
+        ack_error_next4 <= ack_error_int4;
+        ack_error_next5 <= ack_error_int5;
+        ack_error_next6 <= ack_error_int6;
+        ack_error_next7 <= ack_error_int7;
+        ack_error_next8 <= ack_error_int8;
+        ack_error_next9 <= ack_error_int9;
+        ack_error_next10 <= ack_error_int10;
+        ack_error_next11 <= ack_error_int11;
+        ack_error_next12 <= ack_error_int12;
+        ack_error_next13 <= ack_error_int13;
+        ack_error_next14 <= ack_error_int14;
+        ack_error_next15 <= ack_error_int15;
+        ack_error_next16 <= ack_error_int16;
+        ack_error_next17 <= ack_error_int17;
+        ack_error_next18 <= ack_error_int18;
+        ack_error_next19 <= ack_error_int19;
+
+        sda_next <= sda_reg;
+        sda_oen_next <= sda_oen_reg;
+        delay_counter_next <= delay_counter_reg;
+        delay_stop_next<= delay_stop_reg;
+        case state_reg is
+            when IDLE =>
+                busy_next <= '0';
+                done_next <= '0';
+                ack_error_next0 <= '0';
+                ack_error_next1 <= '0';
+                ack_error_next2 <= '0';
+                ack_error_next3 <= '0';
+                ack_error_next4 <= '0';
+                ack_error_next5 <= '0';
+                ack_error_next6 <= '0';
+                ack_error_next7 <= '0';
+                ack_error_next8 <= '0';
+                ack_error_next9 <= '0';
+                ack_error_next10 <= '0';
+                ack_error_next11 <= '0';
+                ack_error_next12 <= '0';
+                ack_error_next13 <= '0';
+                ack_error_next14 <= '0';
+                ack_error_next15 <= '0';
+                ack_error_next16 <= '0';
+                ack_error_next17 <= '0';
+                ack_error_next18 <= '0';
+                ack_error_next19 <= '0';
+                
+
+                bit_count_next <= (others => '0');
+                byte_count_next <= (others => '0');
+                delay_counter_next <= (others => '0');
+                sda_next <= '1';
+                sda_oen_next <= '1'; -- release SDA in idle
+                if start = '1' then
+                    busy_next <= '1';
+                    state_next <= START_COND_R0;
+                end if;
+
+            when START_COND_R0 =>
+                -- Make start: SDA low while SCL high
+                sda_next <= '0';
+                sda_oen_next <= '0';  -- drive SDA low
+                tx_data_next <= ADAU1761_ADDR;
+                bit_count_next <= to_unsigned(7, bit_count_next'length);
+                -- ensure SCL is high for start (we keep scl_reg as '1' or enforce)
+                scl_next <= '1';
+                if delay_counter_reg = START_DELAY_CYCLES - 1 then
+                           -- sda_oen_next <= '1'; -- release SDA -> goes high via pull-up
+                            state_next <= ADAU_addr;
+                            delay_counter_next <= (others => '0');
+                        else
+                            delay_counter_next <= delay_counter_reg + 1;
+                        end if;
+               
+                
+
+            when ADAU_addr =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL --125
+                        scl_next <= '1';
+                    when  "11111001" =>  -- falling edge : shift data --250
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_CHIP_R0;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_CHIP_R0 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        -----
+                       -- sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next0 <= '1'; -- dung                          
+                        else
+                            ack_error_next0 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R0(15 downto 8);
+                        state_next <= SEND_REG_ADDR_H_R0;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                
+            --- FRAME 2 -----
+               -- Truyen high byte ---
+             when SEND_REG_ADDR_H_R0 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_H_R0;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_H_R0 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ---
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        ---
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next1 <= '1'; 
+                            
+                        else
+                            ack_error_next1 <= '0';
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R0(7 downto 0);
+                        state_next <= SEND_REG_ADDR_L_R0;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                --  low byte --
+                 when SEND_REG_ADDR_L_R0 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_L_R0;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_L_R0 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ------
+                      --  sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next2 <= '1'; --dung
+                           
+                        else
+                            ack_error_next2 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                         tx_data_next <= data_R0;
+                        state_next <= SEND_DATA_R0;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+            
+            --  FRAME 3 ----- 
+            
+            
+            when SEND_DATA_R0 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_DATA_R0;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_DATA_R0 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                       ---****
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                       ---**** 
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next3 <= '1'; -- dung
+                        else
+                            ack_error_next3 <= '0'; -- keep
+                        end if;
+                        -- ******-----
+                        -- neu day la FSM ACK cuoi cung
+                    when "11001000" => -- 200
+                        scl_next <= '1';
+                        if(byte_count_next = "110")then
+                            sda_oen_next <= '0';
+                            sda_next <= '1';
+                        end if;
+
+                     
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8); -- ket thuc roi nap lam gi nua
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        if byte_count_reg = 6 then -- Sent all 6 bytes (0-5)
+                            state_next <= STOP_COND_R0;
+                            byte_count_next <= (others=>'0');
+                        else
+                            byte_count_next <= byte_count_reg + 1;
+                            -- Prepare next byte
+                            case byte_count_reg + 1 is
+                                when "001" => tx_data_next <= data_R1(47 downto 40);
+                                when "010" => tx_data_next <= data_R1(39 downto 32);
+                                when "011" => tx_data_next <= data_R1(31 downto 24);
+                                when "100" => tx_data_next <= data_R1(23 downto 16);
+                                when "101" => tx_data_next <= data_R1(15 downto 8);
+                                when "110" => tx_data_next <= data_R1(7 downto 0);
+                                when others => tx_data_next <= (others => '0');
+                            end case;
+                              
+                                state_next <= SEND_DATA_R0;
+                        end if;
+                        scl_count_next <= (others => '0');
+                  when others => null;      
+                end case;   
+             when STOP_COND_R0 =>
+                scl_next<='1';                  
+                if(delay_stop_reg =  STOP_DELAY_CYCLES-1)then
+                    delay_stop_next<= (others=>'0');
+                    state_next<= START_COND_R15;
+                else
+                    delay_stop_next<= delay_stop_reg+1;
+                end if;           
+             
+-- xong R1 R0             
+             
+       when START_COND_R15 =>
+                -- Make start: SDA low while SCL high
+                sda_next <= '0';
+                sda_oen_next <= '0';  -- drive SDA low
+                tx_data_next <= ADAU1761_ADDR;
+                bit_count_next <= to_unsigned(7, bit_count_next'length);
+                -- ensure SCL is high for start (we keep scl_reg as '1' or enforce)
+                scl_next <= '1';
+                if delay_counter_reg = START_DELAY_CYCLES - 1 then
+                           -- sda_oen_next <= '1'; -- release SDA -> goes high via pull-up
+                            state_next <= SEND_CHIP_ADDR_R15;
+                            delay_counter_next <= (others => '0');
+                        else
+                            delay_counter_next <= delay_counter_reg + 1;
+                        end if;
+               
+                
+
+            when SEND_CHIP_ADDR_R15 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL --125
+                        scl_next <= '1';
+                    when  "11111001" =>  -- falling edge : shift data --250
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_CHIP_R15;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_CHIP_R15 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        -----
+                       -- sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next4 <= '1'; -- dung                          
+                        else
+                            ack_error_next4 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R15(15 downto 8);
+                        state_next <= SEND_REG_ADDR_H_R15;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                
+            --- FRAME 2 -----
+               -- Truyen high byte ---
+             when SEND_REG_ADDR_H_R15 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_H_R15;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_H_R15 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ---
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        ---
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next5 <= '1'; 
+                            
+                        else
+                            ack_error_next5 <= '0';
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R15(7 downto 0);
+                        state_next <= SEND_REG_ADDR_L_R15;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                --  low byte --
+                 when SEND_REG_ADDR_L_R15 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_L_R15;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_L_R15 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ------
+                      --  sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next6 <= '1'; --dung
+                           
+                        else
+                            ack_error_next6 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= data_R15;
+                        state_next <= SEND_DATA_R15;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+            
+            --  FRAME 3 ----- 
+            
+            
+            when SEND_DATA_R15 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_DATA_R15;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_DATA_R15 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                       ---****
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                       ---**** 
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next7 <= '1'; -- dung
+                        else
+                            ack_error_next7 <= '0'; -- keep
+                        end if;
+                        -- ******-----
+                        -- neu day la FSM ACK cuoi cung
+                    when "11001000" => -- 200
+                        scl_next <= '1';
+                        if(byte_count_next = "010")then
+                            sda_oen_next <= '0';
+                            sda_next <= '1';
+                        end if;
+
+                     
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8); -- ket thuc roi nap lam gi nua
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        if byte_count_reg = 2 then -- Sent all 6 bytes (0-5)
+                            state_next <= STOP_COND_R15;
+                            byte_count_next <= (others =>'0');
+                        else
+                            byte_count_next <= byte_count_reg + 1;
+                            -- Prepare next byte
+                            case byte_count_reg + 1 is
+                                when "001" => tx_data_next <= data_R16(7 downto 0);
+                                when "010" => tx_data_next <= data_R17(7 downto 0);
+                                when others => tx_data_next <= (others => '0');
+                            end case;
+                              
+                            state_next <= SEND_DATA_R15;
+                        end if;
+                        scl_count_next <= (others => '0');
+                  when others => null;      
+                end case;   
+             when STOP_COND_R15 =>
+                scl_next<='1';                  
+                if(delay_stop_reg =  STOP_DELAY_CYCLES-1)then
+                    delay_stop_next<= (others=>'0');
+                    state_next<= START_COND_R31;
+                else
+                    delay_stop_next<= delay_stop_reg+1;
+                end if;                 
+-- xong R15 -> R17
+
+    when START_COND_R31 =>
+                -- Make start: SDA low while SCL high
+                sda_next <= '0';
+                sda_oen_next <= '0';  -- drive SDA low
+                tx_data_next <= ADAU1761_ADDR;
+                bit_count_next <= to_unsigned(7, bit_count_next'length);
+                -- ensure SCL is high for start (we keep scl_reg as '1' or enforce)
+                scl_next <= '1';
+                if delay_counter_reg = START_DELAY_CYCLES - 1 then
+                           -- sda_oen_next <= '1'; -- release SDA -> goes high via pull-up
+                            state_next <= SEND_CHIP_ADDR_R31;
+                            delay_counter_next <= (others => '0');
+                        else
+                            delay_counter_next <= delay_counter_reg + 1;
+                        end if;
+               
+                
+
+            when SEND_CHIP_ADDR_R31 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL --125
+                        scl_next <= '1';
+                    when  "11111001" =>  -- falling edge : shift data --250
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_CHIP_R31;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_CHIP_R31 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        -----
+                       -- sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next8 <= '1'; -- dung                          
+                        else
+                            ack_error_next8 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R31(15 downto 8);
+                        state_next <= SEND_REG_ADDR_H_R31;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                
+            --- FRAME 2 -----
+               -- Truyen high byte ---
+             when SEND_REG_ADDR_H_R31 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_H_R31;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_H_R31 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ---
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        ---
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next9 <= '1'; 
+                            
+                        else
+                            ack_error_next9 <= '0';
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R31(7 downto 0);
+                        state_next <= SEND_REG_ADDR_L_R31;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                --  low byte --
+                 when SEND_REG_ADDR_L_R31 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_L_R31;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_L_R31 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ------
+                      --  sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next10 <= '1'; --dung
+                           
+                        else
+                            ack_error_next10 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= data_R31;
+                        state_next <= SEND_DATA_R31;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+            
+            --  FRAME 3 ----- 
+            
+            
+            when SEND_DATA_R31 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_DATA_R31;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_DATA_R31 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                       ---****
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                       ---**** 
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next11 <= '1'; -- dung
+                        else
+                            ack_error_next11 <= '0'; -- keep
+                        end if;
+                        -- ******-----
+                        -- neu day la FSM ACK cuoi cung
+                    when "11001000" => -- 200
+                        scl_next <= '1';
+                        if(byte_count_next = "001")then
+                            sda_oen_next <= '0';
+                            sda_next <= '1';
+                        end if;
+
+                     
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8); -- ket thuc roi nap lam gi nua
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        if byte_count_reg = 2 then -- Sent all 6 bytes (0-5)
+                            state_next <= STOP_COND_R31;
+                            byte_count_next <= (others =>'0');
+                        else
+                            byte_count_next <= byte_count_reg + 1;
+                            -- Prepare next byte
+                            case byte_count_reg + 1 is
+                                when "001" => tx_data_next <= data_R32(7 downto 0);
+                                when others => tx_data_next <= (others => '0');
+                            end case;
+                              
+                            state_next <= SEND_DATA_R31;
+                        end if;
+                        scl_count_next <= (others => '0');
+                  when others => null;      
+                end case;   
+             when STOP_COND_R31 =>
+                scl_next<='1';                  
+                if(delay_stop_reg =  STOP_DELAY_CYCLES-1)then
+                    delay_stop_next<= (others=>'0');
+                    state_next<= START_COND_R57;
+                else
+                    delay_stop_next<= delay_stop_reg+1;
+                end if; 
+-- xong R31-32
+        
+    when START_COND_R57 =>
+                -- Make start: SDA low while SCL high
+                sda_next <= '0';
+                sda_oen_next <= '0';  -- drive SDA low
+                tx_data_next <= ADAU1761_ADDR;
+                bit_count_next <= to_unsigned(7, bit_count_next'length);
+                -- ensure SCL is high for start (we keep scl_reg as '1' or enforce)
+                scl_next <= '1';
+                if delay_counter_reg = START_DELAY_CYCLES - 1 then
+                           -- sda_oen_next <= '1'; -- release SDA -> goes high via pull-up
+                            state_next <= SEND_CHIP_ADDR_R57;
+                            delay_counter_next <= (others => '0');
+                        else
+                            delay_counter_next <= delay_counter_reg + 1;
+                        end if;
+               
+                
+
+            when SEND_CHIP_ADDR_R57 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL --125
+                        scl_next <= '1';
+                    when  "11111001" =>  -- falling edge : shift data --250
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_CHIP_R57;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_CHIP_R57 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        -----
+                       -- sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next12 <= '1'; -- dung                          
+                        else
+                            ack_error_next12 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R57(15 downto 8);
+                        state_next <= SEND_REG_ADDR_H_R57;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                
+            --- FRAME 2 -----
+               -- Truyen high byte ---
+             when SEND_REG_ADDR_H_R57 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_H_R57;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_H_R57 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ---
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        ---
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next13 <= '1'; 
+                            
+                        else
+                            ack_error_next13 <= '0';
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R57(7 downto 0);
+                        state_next <= SEND_REG_ADDR_L_R57;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                --  low byte --
+                 when SEND_REG_ADDR_L_R57 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_L_R57;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_L_R57 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ------
+                      --  sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next14 <= '1'; --dung
+                           
+                        else
+                            ack_error_next14 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                         tx_data_next <= data_R57;
+                        state_next <= SEND_DATA_R57;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+            
+            --  FRAME 3 ----- 
+            
+            
+            when SEND_DATA_R57 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_DATA_R57;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_DATA_R57 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                       ---****
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                       ---**** 
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next15 <= '1'; -- dung
+                        else
+                            ack_error_next15 <= '0'; -- keep
+                        end if;
+                        -- ******-----
+                        -- neu day la FSM ACK cuoi cung
+                     when "11001000" => -- 200
+                        scl_next <= '1';
+                        sda_oen_next <= '0';
+                        sda_next <= '1';
+                        --- *******------
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8); -- ket thuc roi nap lam gi nua
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        state_next <= STOP_COND_R57;
+                        scl_count_next <= (others => '0');
+                     when others=> null;
+                end case;    
+            when STOP_COND_R57 =>
+                scl_next<='1';                  
+                if(delay_stop_reg =  STOP_DELAY_CYCLES-1)then
+                    delay_stop_next<= (others=>'0');
+                    state_next<= START_COND_R64;
+                else
+                    delay_stop_next<= delay_stop_reg+1;
+                end if; 
+ -- xong R57
+    when START_COND_R64 =>
+                -- Make start: SDA low while SCL high
+                sda_next <= '0';
+                sda_oen_next <= '0';  -- drive SDA low
+                tx_data_next <= ADAU1761_ADDR;
+                bit_count_next <= to_unsigned(7, bit_count_next'length);
+                -- ensure SCL is high for start (we keep scl_reg as '1' or enforce)
+                scl_next <= '1';
+                if delay_counter_reg = START_DELAY_CYCLES - 1 then
+                           -- sda_oen_next <= '1'; -- release SDA -> goes high via pull-up
+                            state_next <= SEND_CHIP_ADDR_R64;
+                            delay_counter_next <= (others => '0');
+                        else
+                            delay_counter_next <= delay_counter_reg + 1;
+                        end if;
+               
+                
+
+            when SEND_CHIP_ADDR_R64 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL --125
+                        scl_next <= '1';
+                    when  "11111001" =>  -- falling edge : shift data --250
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_CHIP_R64;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_CHIP_R64 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        -----
+                       -- sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next16 <= '1'; -- dung                          
+                        else
+                            ack_error_next16 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R64(15 downto 8);
+                        state_next <= SEND_REG_ADDR_H_R64;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                
+            --- FRAME 2 -----
+               -- Truyen high byte ---
+             when SEND_REG_ADDR_H_R64 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_H_R64;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_H_R64 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ---
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        ---
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next17 <= '1'; 
+                            
+                        else
+                            ack_error_next17 <= '0';
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        tx_data_next <= addr_R64(7 downto 0);
+                        state_next <= SEND_REG_ADDR_L_R64;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+                
+                --  low byte --
+                 when SEND_REG_ADDR_L_R64 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_REG_L_R64;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_REG_L_R64 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                        ------
+                      --  sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                        -----
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next18 <= '1'; --dung
+                           
+                        else
+                            ack_error_next18 <= '0'; -- sai
+                        end if;                       
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8);
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                         tx_data_next <= data_R64;
+                        state_next <= SEND_DATA_R64;
+                        scl_count_next <= (others => '0');
+                        
+                    when others =>
+                        null;
+                end case;
+            
+            --  FRAME 3 ----- 
+            
+            
+            when SEND_DATA_R64 =>
+                -- increment scl counter
+                scl_count_next <= scl_count_reg + 1;
+
+                -- set defaults during transfer: drive SDA (sda_oen=0)
+                sda_oen_next <= '0';
+
+                case scl_count_reg is
+                    when "00000000" =>  -- setup data (SCL low)
+                        scl_next <= '0';
+                        sda_next <= tx_data_reg(7); -- present MSB
+                    when "01111101" =>  -- rising edge of SCL
+                        scl_next <= '1';
+                   when "11111001" =>  -- falling edge : shift data
+                        scl_next <= '0';
+                        tx_data_next <= tx_data_reg(6 downto 0) & '0';
+                        if bit_count_reg = 0 then
+                            state_next <= WAIT_ACK_DATA_R64;
+                            -- release SDA later in WAIT_ACK state
+                        else
+                            bit_count_next <= bit_count_reg - 1;
+                        end if;
+                        scl_count_next <= (others => '0');
+                    when others =>
+                        null;
+                end case;
+
+            when WAIT_ACK_DATA_R64 =>
+                scl_count_next <= scl_count_reg + 1;
+                -- during ACK we must release SDA (tri-state) so slave can pull it low
+                case scl_count_reg is
+                    when "00000000" =>  -- setup (SCL low): release SDA
+                        scl_next <= '0';
+                        sda_oen_next <= '1'; -- release SDA (Z)
+                       ---****
+                     --   sda_next <= 'Z';      -- don't drive 1, but keep internal value
+                       ---**** 
+                    when "01111101" =>  -- rising edge: sample SDA
+                        scl_next <= '1';
+                        -- sample ack at rising edge
+                        if sda = '0' then
+                            ack_error_next19 <= '1'; -- dung
+                        else
+                            ack_error_next19 <= '0'; -- keep
+                        end if;
+                        -- ******-----
+                        -- neu day la FSM ACK cuoi cung
+                     when "11001000" => -- 200
+                        scl_next <= '1';
+                        sda_oen_next <= '0';
+                        sda_next <= '1';
+                        --- *******------
+                     when "11111001" =>  -- falling edge: prepare next byte
+                        scl_next <= '0';
+                    --  tx_data_next <= addr_R0(15 downto 8); -- ket thuc roi nap lam gi nua
+                        bit_count_next <= to_unsigned(7, bit_count_next'length);
+                        sda_oen_next <= '0'; -- prepare to drive next byte
+                        state_next <= STOP_COND_R64;
+                        scl_count_next <= (others => '0');
+                      when others=> null;  
+                 end case;
+            when STOP_COND_R64 =>
+                scl_next<='1';                  
+                if(delay_stop_reg =  STOP_DELAY_CYCLES-1)then
+                    delay_stop_next<= (others=>'0');
+                    state_next<= DONE_STATE;
+                else
+                    delay_stop_next<= delay_stop_reg+1;
+                end if; 
+                
+            when DONE_STATE =>
+                done_next <= '1';
+                busy_next <= '0';
+               if (( ack_error_int0 = '1') and 
+                  ( ack_error_int1 = '1') and 
+                  ( ack_error_int2 = '1') and 
+                  ( ack_error_int3 = '1')and
+                   ( ack_error_int4 = '1')and
+                   ( ack_error_int5 = '1')and
+                   ( ack_error_int6 = '1')and
+                   ( ack_error_int7 = '1')and
+                   ( ack_error_int8 = '1')and
+                   ( ack_error_int9 = '1')and
+                   ( ack_error_int10 = '1')and
+                   ( ack_error_int11 = '1')and
+                   ( ack_error_int12 = '1')and
+                   ( ack_error_int13 = '1')and
+                   ( ack_error_int14 = '1')and
+                   ( ack_error_int15 = '1')and
+                   ( ack_error_int16 = '1')and
+                   ( ack_error_int17 = '1')and
+                   ( ack_error_int18 = '1')and
+                   ( ack_error_int19 = '1')) then
+
+                    led_next <= '1';
+                end if;
+
+                when others =>
+                state_next <=  DONE_STATE;
+        end case;
+                    
+
+           
+            
+    end process;
+
+    -- outputs
+    busy <= busy_reg;
+    done <= done_reg;
+    ack_error <= ack_error_int0;
+
+end frame;

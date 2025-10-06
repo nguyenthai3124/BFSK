@@ -1,0 +1,198 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+entity i2s_Controller is
+    Generic (
+        DATA_WIDTH : integer := 24;  -- 24 bits per channel
+        CLK_DIV    : integer := 4     -- BCLK = CLK / CLK_DIV
+    );
+    Port (
+        -- System signals
+        clk         : in  STD_LOGIC;
+        reset       : in  STD_LOGIC;
+        
+        -- I2S interface
+        lrclk       : out STD_LOGIC;  -- Word Select (LRCLK)
+        bclk        : out STD_LOGIC;  -- Serial Clock (BCLK) 
+        sdata       : out STD_LOGIC;  -- Serial Data (SDATA)
+        
+        -- Debug outputs for simulation
+        current_state : out integer range 0 to 4;  -- Current state
+        bit_position  : out integer range 0 to DATA_WIDTH-1;  -- Current bit
+        frame_position: out integer range 0 to (DATA_WIDTH*2)-1;  -- Frame bit counter
+        channel_debug : out STD_LOGIC  -- Current channel (0=LEFT, 1=RIGHT)
+    );
+end i2s_Controller;
+
+architecture Behavioral of i2s_Controller is
+    
+    -- Hardcoded test data - 24-bit values
+    constant LEFT_TEST_DATA  : STD_LOGIC_VECTOR(23 downto 0) := x"A5A5A5";  -- Left channel data
+    constant RIGHT_TEST_DATA : STD_LOGIC_VECTOR(23 downto 0) := x"5A5A5A";  -- Right channel data
+    
+    -- Clock generation and LRCLK control
+    signal frame_bit_counter : integer range 0 to (DATA_WIDTH*2)-1 := 0;  -- Count bits for entire frame
+    
+    -- Clock generation
+    signal bclk_counter : integer range 0 to CLK_DIV-1 := 0;
+    signal bclk_int     : STD_LOGIC := '0';
+    signal bclk_rising  : STD_LOGIC := '0';
+    signal bclk_falling : STD_LOGIC := '0';
+    
+    -- Frame control
+    signal bit_counter  : integer range 0 to DATA_WIDTH-1 := 0;
+    signal lrclk_int    : STD_LOGIC := '0';  -- '0' = LEFT, '1' = RIGHT
+    
+    -- Data handling
+    signal shift_reg    : STD_LOGIC_VECTOR(DATA_WIDTH-1 downto 0) := (others => '0');
+    
+    -- State machine - Fixed enumeration
+    type state_type is (IDLE, LOAD_LEFT, SEND_LEFT, LOAD_RIGHT, SEND_RIGHT);
+    signal state : state_type := IDLE;
+    
+    -- Auto-start control
+    signal start_counter : integer range 0 to 1000 := 0;
+    signal auto_start    : STD_LOGIC := '0';
+    
+    -- I2S Timing delay (1 BCLK delay after LRCLK change)
+    signal delay_counter : integer range 0 to 1 := 0;
+    signal transmission_active : STD_LOGIC := '0';
+    
+begin
+
+    -- Output assignments
+    bclk <= bclk_int;
+    lrclk <= lrclk_int;
+    sdata <= shift_reg(DATA_WIDTH-1);
+    
+    -- Debug outputs
+    with state select current_state <=
+        0 when IDLE,
+        1 when LOAD_LEFT,
+        2 when SEND_LEFT,
+        3 when LOAD_RIGHT,
+        4 when SEND_RIGHT;
+    
+    bit_position <= bit_counter;
+    frame_position <= frame_bit_counter;
+    channel_debug <= lrclk_int;
+
+    -- BCLK generation process
+    bclk_gen: process(clk, reset)
+    begin
+        if reset = '0' then
+            bclk_counter <= 0;
+            bclk_int <= '0';
+            bclk_rising <= '0';
+            bclk_falling <= '0';
+        elsif rising_edge(clk) then
+            bclk_rising <= '0';
+            bclk_falling <= '0';
+            
+            if bclk_counter = CLK_DIV-1 then
+                bclk_counter <= 0;
+                bclk_int <= not bclk_int;
+                if bclk_int = '0' then
+                    bclk_rising <= '1';
+                else
+                    bclk_falling <= '1';
+                end if;
+            else
+                bclk_counter <= bclk_counter + 1;
+            end if;
+        end if;
+    end process;
+
+    -- Frame bit counter process (for LRCLK generation)
+    frame_counter_proc: process(clk, reset)
+    begin
+        if reset = '0' then
+            frame_bit_counter <= 0;
+        elsif rising_edge(clk) then
+            if bclk_falling = '1' and transmission_active = '1' then
+                if frame_bit_counter = (DATA_WIDTH*2)-1 then
+                    frame_bit_counter <= 0;  -- Reset for next frame
+                else
+                    frame_bit_counter <= frame_bit_counter + 1;
+                end if;
+            elsif state = IDLE then
+                frame_bit_counter <= 0;  -- Reset when idle
+            end if;
+        end if;
+    end process;
+
+    -- Auto-start generation
+    auto_start_gen: process(clk, reset)
+    begin
+        if reset = '0' then
+            start_counter <= 0;
+            auto_start <= '0';
+        elsif rising_edge(clk) then
+            if start_counter = 999 then
+                start_counter <= 0;
+                auto_start <= '1';
+            else
+                start_counter <= start_counter + 1;
+                auto_start <= '0';
+            end if;
+        end if;
+    end process;
+    
+    -- Main I2S state machine - I2S compliant with proper timing
+    i2s_fsm: process(bclk_int, reset)
+begin
+    if reset = '0' then
+        state <= IDLE;
+        bit_counter <= 0;
+        shift_reg <= (others => '0');
+        lrclk_int <= '1';
+        transmission_active <= '0';
+
+    elsif falling_edge(bclk_int) then
+        case state is
+            when IDLE =>
+                transmission_active <= '0';
+                bit_counter <= 0;
+                lrclk_int <= '0';
+                state <= LOAD_LEFT;
+
+            when LOAD_LEFT =>
+                shift_reg <= LEFT_TEST_DATA;
+                bit_counter <= 0;
+                transmission_active <= '1';
+                state <= SEND_LEFT;
+
+            when SEND_LEFT =>
+                if bit_counter = DATA_WIDTH-1 then
+                    state <= LOAD_RIGHT;
+                    bit_counter <= 0;
+                    lrclk_int <= '1';
+                else
+                    shift_reg <= shift_reg(DATA_WIDTH-2 downto 0) & '0';
+                    bit_counter <= bit_counter + 1;
+                end if;
+
+            when LOAD_RIGHT =>
+                shift_reg <= RIGHT_TEST_DATA;
+                bit_counter <= 0;
+                state <= SEND_RIGHT;
+
+            when SEND_RIGHT =>
+                if bit_counter = DATA_WIDTH-1 then
+                    state <= LOAD_LEFT;
+                    bit_counter <= 0;
+                    lrclk_int <= '0';
+                else
+                    shift_reg <= shift_reg(DATA_WIDTH-2 downto 0) & '0';
+                    bit_counter <= bit_counter + 1;
+                end if;
+
+            when others =>
+                state <= IDLE;
+        end case;
+    end if;
+end process;
+
+
+end Behavioral;

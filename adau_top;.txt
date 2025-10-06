@@ -1,0 +1,202 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+entity adau1761_top is
+    Port (
+        -- System signals
+        clk         : in  STD_LOGIC;  -- System clock (100MHz assumed)
+        reset       : in  STD_LOGIC;  -- Active high reset
+        
+        -- ADAU1761 Interface pins (matching diagram)
+        -- I2C Interface
+        SDA         : inout STD_LOGIC;  -- I2C Data
+        SCL         : out   STD_LOGIC;  -- I2C Clock
+        
+        -- I2S Interface  
+        BCLK        : out   STD_LOGIC;  -- Bit Clock
+        LRCLK       : out   STD_LOGIC;  -- Left/Right Clock (Word Select)
+        -- ADC_SDATA removed as requested
+        DAC_SDATA   : out   STD_LOGIC;  -- DAC Serial Data
+        
+        -- Master Clock
+        MCLK        : out   STD_LOGIC;  -- Master Clock (20MHz)
+        i2c_start   : in STD_LOGIC ;
+
+        -- Status outputs
+        config_done : out   STD_LOGIC  -- Configuration complete
+    );
+end adau1761_top;
+
+architecture Behavioral of adau1761_top is
+
+    
+    -- MCLK generation (20MHz from system clock)
+    -- Assuming 100MHz system clock: 100MHz / 5 = 20MHz
+    constant MCLK_DIVIDE : integer := 2;  -- Adjust based on your system clock
+    signal mclk_counter  : integer range 0 to MCLK_DIVIDE-1 := 0;
+    signal mclk_int      : STD_LOGIC := '0';
+
+    -- I2C control signals
+    signal i2c_done      : STD_LOGIC;
+
+    -- I2S control signals
+    signal i2s_reset     : STD_LOGIC ;
+    
+    -- Configuration state machine
+    type config_state_type is (
+        RESET_STATE,
+        WAIT_STABLE,
+        START_I2C_CONFIG,
+        WAIT_I2C_DONE,
+        CONFIG_COMPLETE,
+        ERROR_STATE
+    );
+    signal config_state : config_state_type ;
+    signal config_state_next : config_state_type ;
+    
+    -- Timing counters
+    signal reset_counter_reg   : unsigned(8 downto 0) ;
+    signal reset_counter_next   : unsigned(8 downto 0) ;
+
+    signal startup_counter_reg : unsigned(10 downto 0) ;  -- ~10ms at 100MHz
+    signal startup_counter_next : unsigned(10 downto 0) ;  -- ~10ms at 100MHz
+   
+    -- Status signals
+    signal config_done_reg  : STD_LOGIC ;
+    signal config_done_next  : STD_LOGIC ;
+
+    signal config_error_reg : STD_LOGIC ;
+    signal config_error_next : STD_LOGIC ;
+
+begin
+
+    i2c_controller: entity work.i2c
+        port map (
+            clk       => clk,
+            reset     => reset,
+            start     => i2c_start,
+            scl       => SCL,
+            sda       => SDA,
+            led_check => i2c_done  
+        );
+
+    -- I2S Controller Instance
+    i2s_controllers: entity work.i2s_Controller
+        generic map (
+            DATA_WIDTH => 24,
+            CLK_DIV    => 4  -- Adjust based on desired BCLK frequency
+        )
+        port map (
+            clk           => clk,
+            reset         => i2s_reset,
+            lrclk         => LRCLK,
+            bclk          => BCLK,
+            sdata         => DAC_SDATA,
+            current_state => open,     -- Not used in top level
+            bit_position  => open,     -- Not used in top level
+            frame_position=> open,     -- Not used in top level
+            channel_debug => open      -- Not used in top level
+        );
+
+
+
+
+    -- MCLK Generation Process (20MHz)
+    mclk_gen: process(clk, reset)
+    begin
+        if reset = '0' then
+            mclk_counter <= 0;
+            mclk_int <= '0';
+        elsif rising_edge(clk) then
+            if mclk_counter = MCLK_DIVIDE-1 then
+                mclk_counter <= 0;
+                mclk_int <= not mclk_int;
+            else
+                mclk_counter <= mclk_counter + 1;
+            end if;
+        end if;
+    end process;
+
+    -- Configuration State Machine
+    config_fsm: process(clk, reset)
+    begin
+        if reset = '0' then
+            config_state <= RESET_STATE;
+            i2s_reset <= '0';
+            config_done_reg <= '0';
+            config_error_reg <= '0';
+            reset_counter_reg <= (others => '0');
+            startup_counter_reg <= (others => '0');
+            
+        elsif rising_edge(clk) then
+            -- Default assignments
+            i2s_reset <= '0';
+            config_done_reg <= config_done_next;
+            config_error_reg <= config_error_next;
+            config_state<= config_state_next;
+            reset_counter_reg <= reset_counter_next;
+            startup_counter_reg <= startup_counter_next;
+        end if;
+        end process;
+        
+       process(config_state,config_done_reg,config_error_reg,reset_counter_reg,startup_counter_reg)
+       begin
+            config_state_next<= config_state;
+            config_done_next <= config_done_reg;
+            config_error_next <= config_error_reg;
+            reset_counter_next <= reset_counter_reg;
+            startup_counter_next <= startup_counter_reg;
+            i2s_reset <= '0';
+            case config_state is
+                when RESET_STATE =>
+                    i2s_reset <= '0';
+                    config_done_next <= '0';
+                    config_error_next <= '0';
+                    reset_counter_next <= reset_counter_reg + 1;
+                    
+                    -- Hold reset for sufficient time
+                    if reset_counter_reg = 255 then
+                        reset_counter_next <= (others => '0');
+                        config_state_next <= WAIT_STABLE;
+                    end if;
+
+                when WAIT_STABLE =>
+                    -- Wait for clocks to stabilize before starting I2C config
+                    startup_counter_next <= startup_counter_reg + 1;
+                    if startup_counter_reg = 1023 then  -- ~10ms at 100MHz
+                        startup_counter_next <= (others => '0');
+                        config_state_next <= START_I2C_CONFIG;
+                    end if;
+
+                when START_I2C_CONFIG =>
+                    if(i2c_start <= '1')then
+                        config_state_next <= WAIT_I2C_DONE;
+                    end if;
+
+                when WAIT_I2C_DONE =>
+                    if i2c_done = '1' then
+                        
+                        config_state_next <= CONFIG_COMPLETE;
+                        config_done_next <= '1';
+                        i2s_reset <= '1';  -- Release I2S reset after successful config
+                    end if;
+
+                when CONFIG_COMPLETE =>
+                    -- Stay in this state - configuration complete
+                    config_done_next <= '1';
+
+
+                when others =>
+                    config_state_next <= RESET_STATE;
+            end case;
+        end process;
+
+    -- I2C Controller Instance
+    
+
+    -- Output assignments
+    MCLK <= mclk_int;
+    config_done <= config_done_reg;
+    
+end Behavioral;
