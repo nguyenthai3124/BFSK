@@ -1,0 +1,35 @@
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+
+entity chia_clk is
+    port(
+        clk: in std_logic;
+        reset: in std_logic;
+        clk_1MHz: out std_logic
+    );
+end chia_clk;
+
+architecture Behavioral of chia_clk is
+    signal counter: integer range 0 to 49; 
+    signal fake_out: std_logic;
+begin
+
+    process(clk,reset)
+    begin
+        if(reset='0')then
+            counter <= 0;
+            fake_out<= '0';
+        elsif rising_edge(clk)then
+            if(counter=49)then
+                counter <= 0;
+                fake_out <= not fake_out;
+            else
+                counter<=counter+1;
+            end if;
+        end if;
+    end process;
+    clk_1MHz<= fake_out;   
+            
+
+end Behavioral;

@@ -1,0 +1,88 @@
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use ieee.numeric_std.all;
+entity BFSK is
+    
+    port(
+        clk: in std_logic;
+        reset: in std_logic;
+        
+        --2 sine wave
+        PINC_12k: in std_logic_vector(31 downto 0);
+        PINC_12k8: in std_logic_vector(31 downto 0);
+    
+        data: in std_logic_vector(999 downto 0);
+        start: in std_logic;
+        -- MUX out
+        M_tunning: out std_logic_vector(31 downto 0)
+    );
+end BFSK;
+
+architecture Behavior of BFSK is
+
+    type FSM is (IDLE,MODUL,DONE);
+    signal state_reg : FSM;
+    signal state_next : FSM;
+
+    signal count_bit_reg: unsigned(9 downto 0) ;
+    signal count_bit_next: unsigned(9 downto 0) ;
+    signal mux_out_reg:std_logic_vector(31 downto 0);
+    signal mux_out_next:std_logic_vector(31 downto 0);
+    signal shift_reg: std_logic_vector(999 downto 0);
+    signal shift_next: std_logic_vector(999 downto 0);
+
+begin
+    process(clk,reset)
+    begin
+        if(reset='0')then
+            count_bit_reg<= (others =>'0');
+            mux_out_reg<= (others =>'0');
+            shift_reg<=(others =>'0');
+            state_reg<= IDLE;
+        elsif rising_edge(clk) then
+            mux_out_reg<= mux_out_next;
+            count_bit_reg<= count_bit_next;
+            shift_reg<= shift_next;
+            state_reg<= state_next;
+        end if;
+    end process;
+    
+    process(data,shift_reg,mux_out_reg,count_bit_reg,state_reg)
+    begin
+        mux_out_next<=mux_out_reg;
+        count_bit_next<= count_bit_reg;
+        shift_next<= shift_reg;
+        state_next<= state_reg;
+        
+        case state_reg is 
+            when IDLE =>
+                shift_next <= (others => '0');
+                count_bit_next<= (others => '0');
+                mux_out_next<= (others =>'0');
+                if(start <= '1')then
+                    state_next<= MODUL;
+                    shift_next<= data;
+                    count_bit_next<= (others =>'0');
+                end if;
+                
+            when MODUL =>
+                if(count_bit_reg ="1111100111")then
+                    state_next<= DONE;
+                else    
+                    count_bit_next<= count_bit_reg +1;
+                    if(shift_reg(999)='0')then
+                        mux_out_next <= PINC_12k ;
+                    else
+                        mux_out_next <= PINC_12k8;
+                    end if;    
+                    shift_next<= shift_reg(998 downto 0) & '0';
+                end if;
+            when DONE =>
+                mux_out_next<= (others =>'0');
+        
+        end case;
+        
+    end process;   
+    M_tunning<= mux_out_reg;
+end Behavior;
